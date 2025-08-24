@@ -1,1 +1,1 @@
-# Fin-Wallet
+# fintech-app-alpha
