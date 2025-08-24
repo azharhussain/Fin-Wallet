@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
@@ -13,7 +12,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
-import { Eye, EyeOff, Mail, Lock, ArrowLeft, CheckCircle } from 'lucide-react-native';
+import { Eye, EyeOff, Mail, Lock, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react-native';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -21,20 +20,22 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
+  const [error, setError] = useState('');
   const { signIn } = useAuth();
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setError('Please fill in all fields');
       return;
     }
 
     setLoading(true);
-    const { error } = await signIn(email, password);
+    setError('');
+    const { error: signInError } = await signIn(email, password);
 
-    if (error) {
+    if (signInError) {
       setLoading(false);
-      Alert.alert('Login Failed', error.message);
+      setError(signInError.message);
     } else {
       setLoginSuccess(true);
       setTimeout(() => {
@@ -99,11 +100,14 @@ export default function LoginScreen() {
               <Mail color="#9CA3AF" size={20} />
             </View>
             <TextInput
-              style={styles.input}
+              style={[styles.input, !!error && styles.inputError]}
               placeholder="Email address"
               placeholderTextColor="#6B7280"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(text) => {
+                setEmail(text);
+                if (error) setError('');
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -115,11 +119,14 @@ export default function LoginScreen() {
               <Lock color="#9CA3AF" size={20} />
             </View>
             <TextInput
-              style={styles.input}
+              style={[styles.input, !!error && styles.inputError]}
               placeholder="Password"
               placeholderTextColor="#6B7280"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(text) => {
+                setPassword(text);
+                if (error) setError('');
+              }}
               secureTextEntry={!showPassword}
               autoCapitalize="none"
             />
@@ -134,6 +141,13 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          {error ? (
+            <View style={styles.errorContainer}>
+              <AlertCircle color="#EF4444" size={16} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
 
           <TouchableOpacity style={styles.forgotPassword}>
             <Text style={styles.forgotPasswordText}>Forgot password?</Text>
@@ -225,11 +239,31 @@ const styles = StyleSheet.create({
     paddingRight: 50,
     color: '#ffffff',
     fontSize: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  inputError: {
+    borderColor: '#EF4444',
   },
   passwordToggle: {
     position: 'absolute',
     right: 16,
     top: 18,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    marginTop: -8,
+    gap: 8,
+  },
+  errorText: {
+    color: '#F87171',
+    fontSize: 14,
+    flex: 1,
   },
   forgotPassword: {
     alignSelf: 'flex-end',
