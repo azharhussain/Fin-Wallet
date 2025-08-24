@@ -1,10 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, Database } from '../lib/supabase';
+
+type Profile = Database['public']['Tables']['user_profiles']['Row'];
 
 interface AuthContextType {
   session: Session | null;
   user: User | null;
+  profile: Profile | null;
   loading: boolean;
   signUp: (email: string, password: string) => Promise<any>;
   signIn: (email: string, password: string) => Promise<any>;
@@ -16,21 +19,45 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const fetchSessionAndProfile = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+      const currentUser = session?.user;
+      setUser(currentUser ?? null);
 
-    // Listen for auth changes
+      if (currentUser) {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .single();
+        setProfile(profileData);
+      }
+      setLoading(false);
+    };
+
+    fetchSessionAndProfile();
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         setSession(session);
-        setUser(session?.user ?? null);
+        const currentUser = session?.user;
+        setUser(currentUser ?? null);
+
+        if (event === 'SIGNED_IN' && currentUser) {
+          const { data: profileData } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('user_id', currentUser.id)
+            .single();
+          setProfile(profileData);
+        } else if (event === 'SIGNED_OUT') {
+          setProfile(null);
+        }
         setLoading(false);
       }
     );
@@ -48,7 +75,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (data.user && !error) {
-      // Create user profile
       const { error: profileError } = await supabase
         .from('user_profiles')
         .insert({
@@ -80,6 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={{
       session,
       user,
+      profile,
       loading,
       signUp,
       signIn,

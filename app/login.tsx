@@ -45,6 +45,14 @@ export default function LoginScreen() {
     }
   };
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/welcome');
+    }
+  };
+
   const renderButtonContent = () => {
     if (loginSuccess) {
       return (
@@ -77,7 +85,7 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={handleBack}
           >
             <ArrowLeft color="#9CA3AF" size={24} />
           </TouchableOpacity>

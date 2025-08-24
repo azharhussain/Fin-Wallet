@@ -59,6 +59,14 @@ export default function SignupScreen() {
     }
   };
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/welcome');
+    }
+  };
+
   return (
     <LinearGradient
       colors={['#0F172A', '#1E293B']}
@@ -71,7 +79,7 @@ export default function SignupScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={handleBack}
           >
             <ArrowLeft color="#9CA3AF" size={24} />
           </TouchableOpacity>

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
@@ -7,68 +7,96 @@ import Animated, {
   useAnimatedStyle, 
   useSharedValue, 
   withSpring, 
-  withSequence,
+  withTiming,
   withDelay,
+  withRepeat,
+  Easing,
 } from 'react-native-reanimated';
+
+const { width, height } = Dimensions.get('window');
+const LOGO_SIZE = width * 0.4;
 
 export default function SplashScreen() {
   const { session, loading } = useAuth();
-  const scale = useSharedValue(0);
-  const opacity = useSharedValue(0);
-  const titleOpacity = useSharedValue(0);
+
+  const logoScale = useSharedValue(0.5);
+  const logoOpacity = useSharedValue(0);
+  const ring1Scale = useSharedValue(0);
+  const ring2Scale = useSharedValue(0);
+  const textOpacity = useSharedValue(0);
+  const textTranslateY = useSharedValue(30);
 
   useEffect(() => {
-    // Start animations
-    scale.value = withSpring(1, { duration: 1000 });
-    opacity.value = withSpring(1, { duration: 800 });
-    titleOpacity.value = withDelay(500, withSpring(1, { duration: 600 }));
+    // Animate logo entrance
+    logoOpacity.value = withTiming(1, { duration: 800 });
+    logoScale.value = withSpring(1, { damping: 12, stiffness: 90 });
+
+    // Animate rings
+    ring1Scale.value = withDelay(400, withSpring(1, { damping: 15, stiffness: 100 }));
+    ring2Scale.value = withDelay(600, withSpring(1, { damping: 15, stiffness: 100 }));
+
+    // Animate text
+    textOpacity.value = withDelay(800, withTiming(1, { duration: 600 }));
+    textTranslateY.value = withDelay(800, withSpring(0));
 
     // Navigate after animations and auth check
     const timer = setTimeout(() => {
       if (!loading) {
-        if (session) {
-          router.replace('/(tabs)');
-        } else {
-          router.replace('/welcome');
-        }
+        // The root layout will handle redirection based on auth state
+        // This splash screen's only job is to be displayed initially.
+        // The router.replace logic is handled in `app/_layout.tsx`
       }
-    }, 2500);
+    }, 2500); // Keep splash visible for a minimum duration
 
     return () => clearTimeout(timer);
   }, [session, loading]);
 
   const logoStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    opacity: opacity.value,
+    opacity: logoOpacity.value,
+    transform: [{ scale: logoScale.value }],
   }));
 
-  const titleStyle = useAnimatedStyle(() => ({
-    opacity: titleOpacity.value,
+  const ring1Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ring1Scale.value }],
+  }));
+
+  const ring2Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ring2Scale.value }],
+  }));
+
+  const textContainerStyle = useAnimatedStyle(() => ({
+    opacity: textOpacity.value,
+    transform: [{ translateY: textTranslateY.value }],
   }));
 
   return (
     <LinearGradient
-      colors={['#0F172A', '#1E293B', '#8B5CF6']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+      colors={['#0F172A', '#1E293B', '#111827']}
       style={styles.container}
     >
       <View style={styles.content}>
         <Animated.View style={[styles.logoContainer, logoStyle]}>
-          <View style={styles.logo}>
-            <Text style={styles.logoEmoji}>💰</Text>
-          </View>
+          <Animated.View style={[styles.ring, styles.ring1, ring1Style]} />
+          <Animated.View style={[styles.ring, styles.ring2, ring2Style]} />
+          <LinearGradient
+            colors={['#8B5CF6', '#EC4899']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.logoCore}
+          >
+            <Text style={styles.logoText}>FZ</Text>
+          </LinearGradient>
         </Animated.View>
         
-        <Animated.View style={titleStyle}>
+        <Animated.View style={[styles.titleContainer, textContainerStyle]}>
           <Text style={styles.title}>FinanceZ</Text>
-          <Text style={styles.subtitle}>Your money, your future</Text>
+          <Text style={styles.subtitle}>Your money, your future.</Text>
         </Animated.View>
       </View>
       
-      <View style={styles.footer}>
+      <Animated.View style={[styles.footer, textContainerStyle]}>
         <Text style={styles.footerText}>Building your financial freedom</Text>
-      </View>
+      </Animated.View>
     </LinearGradient>
   );
 }
@@ -76,8 +104,6 @@ export default function SplashScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   content: {
     flex: 1,
@@ -85,38 +111,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoContainer: {
-    marginBottom: 40,
-  },
-  logo: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    width: LOGO_SIZE,
+    height: LOGO_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    marginBottom: 40,
   },
-  logoEmoji: {
-    fontSize: 48,
+  ring: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderRadius: LOGO_SIZE * 1.5,
+  },
+  ring1: {
+    width: LOGO_SIZE * 1.5,
+    height: LOGO_SIZE * 1.5,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  ring2: {
+    width: LOGO_SIZE * 2,
+    height: LOGO_SIZE * 2,
+    borderColor: 'rgba(139, 92, 246, 0.2)',
+  },
+  logoCore: {
+    width: LOGO_SIZE,
+    height: LOGO_SIZE,
+    borderRadius: LOGO_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  logoText: {
+    fontSize: LOGO_SIZE * 0.4,
+    color: '#ffffff',
+    fontWeight: 'bold',
+  },
+  titleContainer: {
+    alignItems: 'center',
   },
   title: {
-    fontSize: 36,
+    fontSize: width * 0.1,
     fontWeight: 'bold',
     color: '#ffffff',
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 18,
+    fontSize: width * 0.045,
     color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
   },
   footer: {
-    paddingBottom: 40,
+    paddingBottom: height * 0.05,
+    alignItems: 'center',
   },
   footerText: {
     color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 14,
+    fontSize: width * 0.035,
   },
 });

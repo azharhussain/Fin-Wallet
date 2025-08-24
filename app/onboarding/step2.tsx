@@ -23,6 +23,12 @@ export default function OnboardingStep2() {
     contentOpacity.value = withDelay(600, withSpring(1, { duration: 600 }));
   }, []);
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    }
+  };
+
   const titleStyle = useAnimatedStyle(() => ({
     opacity: titleOpacity.value,
   }));
@@ -43,7 +49,7 @@ export default function OnboardingStep2() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
         >
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
