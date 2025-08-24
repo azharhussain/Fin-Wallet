@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,32 +6,135 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  ActivityIndicator,
+  RefreshControl
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   PlusCircle,
   ArrowUpRight,
-  ArrowDownLeft,
   Target,
   TrendingUp,
   Award,
   Zap,
 } from 'lucide-react-native';
+import { useFocusEffect, router } from 'expo-router';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase, Database } from '../../lib/supabase';
+import { formatDistanceToNow } from 'date-fns';
 
 const { width } = Dimensions.get('window');
 
+type Profile = Database['public']['Tables']['user_profiles']['Row'];
+type Goal = Database['public']['Tables']['savings_goals']['Row'];
+type Transaction = Database['public']['Tables']['transactions']['Row'];
+type Investment = Database['public']['Tables']['investments']['Row'];
+type Card = Database['public']['Tables']['cards']['Row'];
+
 export default function HomeScreen() {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [totalBalance, setTotalBalance] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchData = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Fetch Profile
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+      if (profileError) throw profileError;
+      setProfile(profileData);
+
+      // Fetch Goals
+      const { data: goalsData, error: goalsError } = await supabase
+        .from('savings_goals')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(3);
+      if (goalsError) throw goalsError;
+      setGoals(goalsData);
+
+      // Fetch Transactions
+      const { data: transactionsData, error: transactionsError } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(3);
+      if (transactionsError) throw transactionsError;
+      setTransactions(transactionsData);
+
+      // Fetch Investments and Cards for total balance
+      const { data: investmentsData, error: investmentsError } = await supabase
+        .from('investments')
+        .select('value')
+        .eq('user_id', user.id);
+      if (investmentsError) throw investmentsError;
+
+      const { data: cardsData, error: cardsError } = await supabase
+        .from('cards')
+        .select('balance')
+        .eq('user_id', user.id);
+      if (cardsError) throw cardsError;
+
+      const investmentTotal = investmentsData?.reduce((sum, item) => sum + item.value, 0) || 0;
+      const cardTotal = cardsData?.reduce((sum, item) => sum + item.balance, 0) || 0;
+      setTotalBalance(investmentTotal + cardTotal);
+
+    } catch (error) {
+      console.error('Error fetching home screen data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchData();
+    }, [user])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchData();
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#8B5CF6" />
+      </View>
+    );
+  }
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+    >
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.greeting}>Hey Alex! 👋</Text>
+          <Text style={styles.greeting}>Hey {profile?.full_name?.split(' ')[0] || 'there'}! 👋</Text>
           <Text style={styles.subtitle}>Ready to grow your money?</Text>
         </View>
-        <TouchableOpacity style={styles.profileButton}>
+        <TouchableOpacity style={styles.profileButton} onPress={() => router.push('/(tabs)/profile')}>
           <View style={styles.profileAvatar}>
-            <Text style={styles.profileText}>A</Text>
+            <Text style={styles.profileText}>{profile?.full_name?.[0] || 'U'}</Text>
           </View>
         </TouchableOpacity>
       </View>
@@ -45,10 +148,10 @@ export default function HomeScreen() {
       >
         <View style={styles.balanceContent}>
           <Text style={styles.balanceLabel}>Total Balance</Text>
-          <Text style={styles.balanceAmount}>$4,672.89</Text>
+          <Text style={styles.balanceAmount}>${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
           <View style={styles.balanceChange}>
             <TrendingUp color="#ffffff" size={16} />
-            <Text style={styles.changeText}>+12.5% this month</Text>
+            <Text style={styles.changeText}>Growth this month</Text>
           </View>
         </View>
         <View style={styles.cardDecoration}>
@@ -61,25 +164,25 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.actionsGrid}>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/(tabs)/wallet')}>
             <View style={[styles.actionIcon, { backgroundColor: '#10B981' }]}>
               <PlusCircle color="#ffffff" size={24} />
             </View>
             <Text style={styles.actionText}>Add Money</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/(tabs)/wallet')}>
             <View style={[styles.actionIcon, { backgroundColor: '#3B82F6' }]}>
               <ArrowUpRight color="#ffffff" size={24} />
             </View>
             <Text style={styles.actionText}>Send</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/(tabs)/goals')}>
             <View style={[styles.actionIcon, { backgroundColor: '#8B5CF6' }]}>
               <Target color="#ffffff" size={24} />
             </View>
             <Text style={styles.actionText}>New Goal</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/(tabs)/invest')}>
             <View style={[styles.actionIcon, { backgroundColor: '#F59E0B' }]}>
               <Zap color="#ffffff" size={24} />
             </View>
@@ -92,32 +195,21 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Active Goals</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/(tabs)/goals')}>
             <Text style={styles.seeAll}>See All</Text>
           </TouchableOpacity>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <GoalCard
-            title="New iPhone 15"
-            target={1200}
-            current={750}
-            color="#8B5CF6"
-            emoji="📱"
-          />
-          <GoalCard
-            title="Summer Vacation"
-            target={3000}
-            current={1850}
-            color="#EC4899"
-            emoji="🏖️"
-          />
-          <GoalCard
-            title="Gaming Setup"
-            target={2500}
-            current={900}
-            color="#10B981"
-            emoji="🎮"
-          />
+          {goals.length > 0 ? goals.map(goal => (
+            <GoalCard
+              key={goal.id}
+              title={goal.title}
+              target={goal.target_amount}
+              current={goal.current_amount}
+              color={goal.color}
+              emoji={goal.emoji}
+            />
+          )) : <Text style={styles.emptyStateText}>No active goals yet. Create one!</Text>}
         </ScrollView>
       </View>
 
@@ -125,32 +217,21 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/(tabs)/wallet')}>
             <Text style={styles.seeAll}>See All</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.transactionsList}>
-          <TransactionItem
-            type="income"
-            title="Freelance Payment"
-            amount="+$450.00"
-            time="2 hours ago"
-            icon="💼"
-          />
-          <TransactionItem
-            type="expense"
-            title="Coffee & Snacks"
-            amount="-$12.50"
-            time="5 hours ago"
-            icon="☕"
-          />
-          <TransactionItem
-            type="savings"
-            title="iPhone Fund"
-            amount="+$50.00"
-            time="1 day ago"
-            icon="📱"
-          />
+          {transactions.length > 0 ? transactions.map(tx => (
+            <TransactionItem
+              key={tx.id}
+              type={tx.type as 'income' | 'expense' | 'savings'}
+              title={tx.title}
+              amount={tx.amount}
+              time={formatDistanceToNow(new Date(tx.created_at), { addSuffix: true })}
+              icon={tx.icon}
+            />
+          )) : <Text style={styles.emptyStateText}>No recent transactions.</Text>}
         </View>
       </View>
 
@@ -177,7 +258,7 @@ function GoalCard({ title, target, current, color, emoji }: {
   color: string;
   emoji: string;
 }) {
-  const progress = (current / target) * 100;
+  const progress = target > 0 ? (current / target) * 100 : 0;
 
   return (
     <View style={[styles.goalCard, { borderLeftColor: color }]}>
@@ -191,7 +272,7 @@ function GoalCard({ title, target, current, color, emoji }: {
         <View
           style={[
             styles.progressFill,
-            { width: `${progress}%`, backgroundColor: color },
+            { width: `${Math.min(progress, 100)}%`, backgroundColor: color },
           ]}
         />
       </View>
@@ -203,21 +284,15 @@ function GoalCard({ title, target, current, color, emoji }: {
 function TransactionItem({ type, title, amount, time, icon }: {
   type: 'income' | 'expense' | 'savings';
   title: string;
-  amount: string;
+  amount: number;
   time: string;
   icon: string;
 }) {
+  const isPositive = amount > 0;
   const getColor = () => {
-    switch (type) {
-      case 'income':
-        return '#10B981';
-      case 'expense':
-        return '#EF4444';
-      case 'savings':
-        return '#8B5CF6';
-      default:
-        return '#6B7280';
-    }
+    if (type === 'income') return '#10B981';
+    if (type === 'expense') return '#EF4444';
+    return '#8B5CF6';
   };
 
   return (
@@ -230,7 +305,7 @@ function TransactionItem({ type, title, amount, time, icon }: {
         <Text style={styles.transactionTime}>{time}</Text>
       </View>
       <Text style={[styles.transactionAmount, { color: getColor() }]}>
-        {amount}
+        {isPositive ? '+' : ''}${Math.abs(amount).toFixed(2)}
       </Text>
     </View>
   );
@@ -239,6 +314,12 @@ function TransactionItem({ type, title, amount, time, icon }: {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#0F172A',
   },
   header: {
@@ -367,6 +448,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
   },
   goalCard: {
     backgroundColor: '#1E293B',
@@ -487,5 +569,12 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontSize: 14,
     marginTop: 2,
+  },
+  emptyStateText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 20,
+    width: width - 40,
   },
 });

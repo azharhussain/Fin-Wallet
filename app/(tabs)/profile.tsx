@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Switch,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -21,65 +24,110 @@ import {
   Target,
   Moon,
 } from 'lucide-react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase, Database } from '../../lib/supabase';
+import { useFocusEffect, router } from 'expo-router';
+import { format } from 'date-fns';
+
+type Profile = Database['public']['Tables']['user_profiles']['Row'];
 
 export default function ProfileScreen() {
-  const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
-  const [darkModeEnabled, setDarkModeEnabled] = React.useState(true);
+  const { user, signOut } = useAuth();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [stats, setStats] = useState({ goals: 0, saved: 0, investments: 0 });
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(true);
 
-  const stats = [
-    { label: 'Goals Completed', value: '12', icon: Target, color: '#10B981' },
-    { label: 'Total Saved', value: '$8.2K', icon: TrendingUp, color: '#3B82F6' },
-    { label: 'Achievements', value: '24', icon: Award, color: '#F59E0B' },
-  ];
+  const fetchData = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data: profileData, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+      if (profileError) throw profileError;
+      setProfile(profileData);
+
+      // Fetch stats
+      const { count: goalsCount, error: goalsError } = await supabase
+        .from('savings_goals')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      const { data: savedData, error: savedError } = await supabase
+        .from('savings_goals')
+        .select('current_amount')
+        .eq('user_id', user.id);
+      
+      const { data: investmentsData, error: investmentsError } = await supabase
+        .from('investments')
+        .select('value')
+        .eq('user_id', user.id);
+
+      if (goalsError || savedError || investmentsError) {
+        console.error(goalsError || savedError || investmentsError);
+      } else {
+        const totalSaved = savedData.reduce((sum, item) => sum + item.current_amount, 0);
+        const totalInvested = investmentsData.reduce((sum, item) => sum + item.value, 0);
+        setStats({
+          goals: goalsCount || 0,
+          saved: totalSaved,
+          investments: totalInvested,
+        });
+      }
+
+    } catch (error) {
+      console.error('Error fetching profile data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchData();
+    }, [user])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchData();
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.replace('/login');
+  };
 
   const menuItems = [
-    {
-      title: 'Account Settings',
-      icon: Settings,
-      color: '#8B5CF6',
-      hasSwitch: false,
-    },
-    {
-      title: 'Security & Privacy',
-      icon: Shield,
-      color: '#10B981',
-      hasSwitch: false,
-    },
-    {
-      title: 'Notifications',
-      icon: Bell,
-      color: '#3B82F6',
-      hasSwitch: true,
-      switchValue: notificationsEnabled,
-      onSwitchChange: setNotificationsEnabled,
-    },
-    {
-      title: 'Dark Mode',
-      icon: Moon,
-      color: '#6B7280',
-      hasSwitch: true,
-      switchValue: darkModeEnabled,
-      onSwitchChange: setDarkModeEnabled,
-    },
-    {
-      title: 'Help & Support',
-      icon: HelpCircle,
-      color: '#F59E0B',
-      hasSwitch: false,
-    },
+    { title: 'Account Settings', icon: Settings, color: '#8B5CF6', hasSwitch: false },
+    { title: 'Security & Privacy', icon: Shield, color: '#10B981', hasSwitch: false },
+    { title: 'Notifications', icon: Bell, color: '#3B82F6', hasSwitch: true, switchValue: notificationsEnabled, onSwitchChange: setNotificationsEnabled },
+    { title: 'Dark Mode', icon: Moon, color: '#6B7280', hasSwitch: true, switchValue: darkModeEnabled, onSwitchChange: setDarkModeEnabled },
+    { title: 'Help & Support', icon: HelpCircle, color: '#F59E0B', hasSwitch: false },
   ];
 
-  const achievements = [
-    { title: 'First Goal', emoji: '🎯', unlocked: true },
-    { title: 'Saver', emoji: '💰', unlocked: true },
-    { title: 'Investor', emoji: '📈', unlocked: true },
-    { title: 'Streak Master', emoji: '🔥', unlocked: true },
-    { title: 'Big Spender', emoji: '💎', unlocked: false },
-    { title: 'Money Master', emoji: '👑', unlocked: false },
-  ];
+  if (loading) {
+    return (
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#8B5CF6" />
+      </View>
+    );
+  }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+    >
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Profile</Text>
@@ -98,14 +146,16 @@ export default function ProfileScreen() {
         <View style={styles.profileInfo}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>A</Text>
+              <Text style={styles.avatarText}>{profile?.full_name?.[0] || 'U'}</Text>
             </View>
             <View style={styles.onlineIndicator} />
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>Alex Johnson</Text>
-            <Text style={styles.userEmail}>alex.johnson@email.com</Text>
-            <Text style={styles.joinDate}>Member since Feb 2024</Text>
+            <Text style={styles.userName}>{profile?.full_name || 'User'}</Text>
+            <Text style={styles.userEmail}>{profile?.email || ''}</Text>
+            <Text style={styles.joinDate}>
+              Member since {profile ? format(new Date(profile.created_at), 'MMM yyyy') : ''}
+            </Text>
           </View>
         </View>
         <TouchableOpacity style={styles.editButton}>
@@ -115,48 +165,27 @@ export default function ProfileScreen() {
 
       {/* Stats */}
       <View style={styles.statsContainer}>
-        {stats.map((stat, index) => (
-          <View key={index} style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: stat.color }]}>
-              <stat.icon color="#ffffff" size={20} />
-            </View>
-            <Text style={styles.statValue}>{stat.value}</Text>
-            <Text style={styles.statLabel}>{stat.label}</Text>
+        <View style={styles.statCard}>
+          <View style={[styles.statIcon, { backgroundColor: '#10B981' }]}>
+            <Target color="#ffffff" size={20} />
           </View>
-        ))}
-      </View>
-
-      {/* Achievements */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Recent Achievements</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {achievements.map((achievement, index) => (
-            <View
-              key={index}
-              style={[
-                styles.achievementCard,
-                !achievement.unlocked && styles.achievementLocked,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.achievementEmoji,
-                  !achievement.unlocked && styles.achievementEmojiLocked,
-                ]}
-              >
-                {achievement.emoji}
-              </Text>
-              <Text
-                style={[
-                  styles.achievementTitle,
-                  !achievement.unlocked && styles.achievementTitleLocked,
-                ]}
-              >
-                {achievement.title}
-              </Text>
-            </View>
-          ))}
-        </ScrollView>
+          <Text style={styles.statValue}>{stats.goals}</Text>
+          <Text style={styles.statLabel}>Active Goals</Text>
+        </View>
+        <View style={styles.statCard}>
+          <View style={[styles.statIcon, { backgroundColor: '#3B82F6' }]}>
+            <TrendingUp color="#ffffff" size={20} />
+          </View>
+          <Text style={styles.statValue}>${(stats.saved + stats.investments).toLocaleString()}</Text>
+          <Text style={styles.statLabel}>Total Value</Text>
+        </View>
+        <View style={styles.statCard}>
+          <View style={[styles.statIcon, { backgroundColor: '#F59E0B' }]}>
+            <Award color="#ffffff" size={20} />
+          </View>
+          <Text style={styles.statValue}>5</Text>
+          <Text style={styles.statLabel}>Achievements</Text>
+        </View>
       </View>
 
       {/* Menu Items */}
@@ -188,27 +217,8 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Financial Summary */}
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle}>This Month Summary</Text>
-        <View style={styles.summaryStats}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Income</Text>
-            <Text style={[styles.summaryValue, { color: '#10B981' }]}>+$3,200</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Expenses</Text>
-            <Text style={[styles.summaryValue, { color: '#EF4444' }]}>-$1,450</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Saved</Text>
-            <Text style={[styles.summaryValue, { color: '#8B5CF6' }]}>+$1,750</Text>
-          </View>
-        </View>
-      </View>
-
       {/* Logout Button */}
-      <TouchableOpacity style={styles.logoutButton}>
+      <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>
         <LogOut color="#EF4444" size={20} />
         <Text style={styles.logoutText}>Sign Out</Text>
       </TouchableOpacity>
@@ -219,6 +229,12 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#0F172A',
   },
   header: {
@@ -352,33 +368,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     marginBottom: 16,
   },
-  achievementCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    marginRight: 12,
-    alignItems: 'center',
-    width: 100,
-  },
-  achievementLocked: {
-    opacity: 0.5,
-  },
-  achievementEmoji: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  achievementEmojiLocked: {
-    opacity: 0.3,
-  },
-  achievementTitle: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  achievementTitleLocked: {
-    color: '#6B7280',
-  },
   menuList: {
     gap: 12,
   },
@@ -410,35 +399,6 @@ const styles = StyleSheet.create({
   },
   menuItemRight: {
     alignItems: 'center',
-  },
-  summaryCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 20,
-    marginBottom: 24,
-  },
-  summaryTitle: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  summaryStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  summaryItem: {
-    alignItems: 'center',
-  },
-  summaryLabel: {
-    color: '#9CA3AF',
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   logoutButton: {
     flexDirection: 'row',

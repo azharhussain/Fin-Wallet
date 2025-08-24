@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,66 +8,125 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus, Target, Calendar, DollarSign, X } from 'lucide-react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase, Database } from '../../lib/supabase';
+import { useFocusEffect } from 'expo-router';
+
+type Goal = Database['public']['Tables']['savings_goals']['Row'];
+
+const EMOJI_OPTIONS = ['🎯', '📱', '🏖️', '🎮', '🚗', '🏠', '💍', '🎓'];
+const COLOR_OPTIONS = ['#8B5CF6', '#EC4899', '#10B981', '#F59E0B', '#3B82F6', '#EF4444'];
 
 export default function GoalsScreen() {
+  const { user } = useAuth();
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [newGoal, setNewGoal] = useState({
     title: '',
-    target: '',
-    emoji: '🎯',
+    target_amount: '',
+    emoji: EMOJI_OPTIONS[0],
   });
 
-  const goals = [
-    {
-      id: 1,
-      title: 'New iPhone 15',
-      target: 1200,
-      current: 750,
-      emoji: '📱',
-      deadline: '2024-06-01',
-      color: '#8B5CF6',
-    },
-    {
-      id: 2,
-      title: 'Summer Vacation',
-      target: 3000,
-      current: 1850,
-      emoji: '🏖️',
-      deadline: '2024-07-15',
-      color: '#EC4899',
-    },
-    {
-      id: 3,
-      title: 'Gaming Setup',
-      target: 2500,
-      current: 900,
-      emoji: '🎮',
-      deadline: '2024-08-30',
-      color: '#10B981',
-    },
-    {
-      id: 4,
-      title: 'Emergency Fund',
-      target: 5000,
-      current: 2100,
-      emoji: '🛡️',
-      deadline: '2024-12-31',
-      color: '#F59E0B',
-    },
-  ];
+  const fetchData = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('savings_goals')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
 
-  const createGoal = () => {
-    if (!newGoal.title || !newGoal.target) {
+      if (error) throw error;
+      setGoals(data || []);
+    } catch (error) {
+      console.error('Error fetching goals:', error);
+      Alert.alert('Error', 'Failed to fetch your goals.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchData();
+    }, [user])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchData();
+  };
+
+  const createGoal = async () => {
+    if (isCreating) return;
+
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in.');
+      return;
+    }
+    if (!newGoal.title || !newGoal.target_amount) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-    setShowCreateModal(false);
-    setNewGoal({ title: '', target: '', emoji: '🎯' });
-    Alert.alert('Success', 'Goal created successfully!');
+
+    const targetAmount = parseFloat(newGoal.target_amount);
+    if (isNaN(targetAmount) || targetAmount <= 0) {
+      Alert.alert('Error', 'Please enter a valid target amount.');
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const randomColor = COLOR_OPTIONS[Math.floor(Math.random() * COLOR_OPTIONS.length)];
+
+      const { error } = await supabase.from('savings_goals').insert({
+        user_id: user.id,
+        title: newGoal.title,
+        target_amount: targetAmount,
+        emoji: newGoal.emoji,
+        color: randomColor,
+      });
+
+      if (error) {
+        throw error;
+      } else {
+        Alert.alert('Success', 'Goal created successfully!');
+        setShowCreateModal(false);
+        setNewGoal({ title: '', target_amount: '', emoji: EMOJI_OPTIONS[0] });
+        fetchData(); // Refresh list
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to create goal.');
+      console.error('Error creating goal:', error);
+    } finally {
+      setIsCreating(false);
+    }
   };
+
+  const totalSaved = goals.reduce((sum, goal) => sum + goal.current_amount, 0);
+  const totalTarget = goals.reduce((sum, goal) => sum + goal.target_amount, 0);
+  const avgProgress = totalTarget > 0 ? (totalSaved / totalTarget) * 100 : 0;
+
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#8B5CF6" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -85,24 +144,37 @@ export default function GoalsScreen() {
       {/* Stats Overview */}
       <View style={styles.statsContainer}>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>4</Text>
+          <Text style={styles.statValue}>{goals.length}</Text>
           <Text style={styles.statLabel}>Active Goals</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>$5,600</Text>
+          <Text style={styles.statValue}>${totalSaved.toLocaleString()}</Text>
           <Text style={styles.statLabel}>Total Saved</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statValue}>68%</Text>
+          <Text style={styles.statValue}>{Math.round(avgProgress)}%</Text>
           <Text style={styles.statLabel}>Avg Progress</Text>
         </View>
       </View>
 
       {/* Goals List */}
-      <ScrollView style={styles.goalsList}>
-        {goals.map((goal) => (
-          <GoalCard key={goal.id} goal={goal} />
-        ))}
+      <ScrollView 
+        style={styles.goalsList}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+      >
+        {goals.length > 0 ? (
+          goals.map((goal) => (
+            <GoalCard key={goal.id} goal={goal} />
+          ))
+        ) : (
+          <View style={styles.emptyStateContainer}>
+            <Target color="#6B7280" size={64} />
+            <Text style={styles.emptyStateTitle}>No Goals Yet</Text>
+            <Text style={styles.emptyStateText}>
+              Create your first savings goal by tapping the '+' button.
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
       {/* Create Goal Modal */}
@@ -122,7 +194,7 @@ export default function GoalsScreen() {
             </View>
 
             <View style={styles.emojiSelector}>
-              {['🎯', '📱', '🏖️', '🎮', '🚗', '🏠', '💍', '🎓'].map((emoji) => (
+              {EMOJI_OPTIONS.map((emoji) => (
                 <TouchableOpacity
                   key={emoji}
                   style={[
@@ -148,13 +220,21 @@ export default function GoalsScreen() {
               style={styles.input}
               placeholder="Target amount"
               placeholderTextColor="#9CA3AF"
-              value={newGoal.target}
-              onChangeText={(target) => setNewGoal({ ...newGoal, target })}
+              value={newGoal.target_amount}
+              onChangeText={(target) => setNewGoal({ ...newGoal, target_amount: target })}
               keyboardType="numeric"
             />
 
-            <TouchableOpacity style={styles.createButton} onPress={createGoal}>
-              <Text style={styles.createButtonText}>Create Goal</Text>
+            <TouchableOpacity 
+              style={[styles.createButton, isCreating && styles.createButtonDisabled]} 
+              onPress={createGoal}
+              disabled={isCreating}
+            >
+              {isCreating ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.createButtonText}>Create Goal</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -163,9 +243,9 @@ export default function GoalsScreen() {
   );
 }
 
-function GoalCard({ goal }: { goal: any }) {
-  const progress = (goal.current / goal.target) * 100;
-  const remaining = goal.target - goal.current;
+function GoalCard({ goal }: { goal: Goal }) {
+  const progress = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0;
+  const remaining = goal.target_amount - goal.current_amount;
 
   return (
     <View style={[styles.goalCard, { borderLeftColor: goal.color }]}>
@@ -174,7 +254,7 @@ function GoalCard({ goal }: { goal: any }) {
           <Text style={styles.goalEmoji}>{goal.emoji}</Text>
           <View style={styles.goalInfo}>
             <Text style={styles.goalTitle}>{goal.title}</Text>
-            <Text style={styles.goalDeadline}>Target: {goal.deadline}</Text>
+            {goal.deadline && <Text style={styles.goalDeadline}>Target: {new Date(goal.deadline).toLocaleDateString()}</Text>}
           </View>
         </View>
         <TouchableOpacity style={styles.addMoneyButton}>
@@ -185,10 +265,10 @@ function GoalCard({ goal }: { goal: any }) {
       <View style={styles.goalProgress}>
         <View style={styles.amountRow}>
           <Text style={styles.currentAmount}>
-            ${goal.current.toLocaleString()}
+            ${goal.current_amount.toLocaleString()}
           </Text>
           <Text style={styles.targetAmount}>
-            of ${goal.target.toLocaleString()}
+            of ${goal.target_amount.toLocaleString()}
           </Text>
         </View>
 
@@ -224,6 +304,12 @@ function GoalCard({ goal }: { goal: any }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#0F172A',
   },
   header: {
@@ -435,9 +521,31 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
   },
+  createButtonDisabled: {
+    backgroundColor: '#6B7280',
+  },
   createButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    marginTop: 40,
+  },
+  emptyStateTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#9CA3AF',
+    textAlign: 'center',
   },
 });

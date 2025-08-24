@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,59 +6,72 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   TrendingUp,
   TrendingDown,
-  DollarSign,
   PieChart,
   BarChart3,
   Zap,
 } from 'lucide-react-native';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase, Database } from '../../lib/supabase';
+import { useFocusEffect } from 'expo-router';
 
 const { width } = Dimensions.get('window');
+type Investment = Database['public']['Tables']['investments']['Row'];
 
 export default function InvestScreen() {
-  const portfolioValue = 2847.92;
-  const todayChange = 42.67;
-  const todayChangePercent = 1.52;
+  const { user } = useAuth();
+  const [investments, setInvestments] = useState<Investment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const investments = [
-    {
-      name: 'Tech Growth ETF',
-      symbol: 'TECH',
-      value: 1245.67,
-      change: 23.45,
-      changePercent: 1.92,
-      color: '#10B981',
-    },
-    {
-      name: 'S&P 500 Index',
-      symbol: 'SPY',
-      value: 892.33,
-      change: 12.22,
-      changePercent: 1.39,
-      color: '#3B82F6',
-    },
-    {
-      name: 'Crypto Bundle',
-      symbol: 'CRYPTO',
-      value: 456.78,
-      change: -8.91,
-      changePercent: -1.91,
-      color: '#F59E0B',
-    },
-    {
-      name: 'Clean Energy',
-      symbol: 'CLEAN',
-      value: 253.14,
-      change: 15.91,
-      changePercent: 6.72,
-      color: '#10B981',
-    },
-  ];
+  const fetchData = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('investments')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('value', { ascending: false });
 
+      if (error) throw error;
+      setInvestments(data || []);
+    } catch (error) {
+      console.error('Error fetching investments:', error);
+      Alert.alert('Error', 'Failed to fetch your investments.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchData();
+    }, [user])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchData();
+  };
+
+  const portfolioValue = investments.reduce((sum, item) => sum + item.value, 0);
+  const totalChange = investments.reduce((sum, item) => {
+    const changeAmount = (item.value * item.change_percent) / 100;
+    return sum + changeAmount;
+  }, 0);
+  const totalChangePercent = portfolioValue > 0 ? (totalChange / portfolioValue) * 100 : 0;
+  
   const recommendations = [
     {
       title: 'Diversify with Bonds',
@@ -83,8 +96,26 @@ export default function InvestScreen() {
     },
   ];
 
+  const COLOR_MAP: { [key: string]: string } = {
+    TECH: '#10B981',
+    SPY: '#3B82F6',
+    CRYPTO: '#F59E0B',
+    CLEAN: '#10B981',
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#8B5CF6" />
+      </View>
+    );
+  }
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
+    >
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Invest & Grow</Text>
@@ -100,16 +131,18 @@ export default function InvestScreen() {
       >
         <View style={styles.portfolioHeader}>
           <Text style={styles.portfolioLabel}>Portfolio Value</Text>
-          <View style={styles.changeIndicator}>
-            <TrendingUp color="#10B981" size={16} />
-            <Text style={styles.changeText}>+{todayChangePercent}%</Text>
+          <View style={[styles.changeIndicator, { backgroundColor: totalChangePercent >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }]}>
+            {totalChangePercent >= 0 ? <TrendingUp color="#10B981" size={16} /> : <TrendingDown color="#EF4444" size={16} />}
+            <Text style={[styles.changeText, { color: totalChangePercent >= 0 ? '#10B981' : '#EF4444' }]}>
+              {totalChangePercent >= 0 ? '+' : ''}{totalChangePercent.toFixed(2)}%
+            </Text>
           </View>
         </View>
         <Text style={styles.portfolioValue}>
-          ${portfolioValue.toLocaleString()}
+          ${portfolioValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </Text>
-        <Text style={styles.portfolioChange}>
-          +${todayChange.toFixed(2)} today
+        <Text style={[styles.portfolioChange, { color: totalChange >= 0 ? '#10B981' : '#EF4444' }]}>
+          {totalChange >= 0 ? '+' : ''}${totalChange.toFixed(2)} today
         </Text>
       </LinearGradient>
 
@@ -150,9 +183,13 @@ export default function InvestScreen() {
           </TouchableOpacity>
         </View>
         <View style={styles.holdingsList}>
-          {investments.map((investment, index) => (
-            <InvestmentCard key={index} investment={investment} />
-          ))}
+          {investments.length > 0 ? (
+            investments.map((investment) => (
+              <InvestmentCard key={investment.id} investment={investment} color={COLOR_MAP[investment.symbol] || '#6B7280'} />
+            ))
+          ) : (
+            <Text style={styles.emptyStateText}>No investments yet. Start growing your money!</Text>
+          )}
         </View>
       </View>
 
@@ -165,23 +202,13 @@ export default function InvestScreen() {
           ))}
         </ScrollView>
       </View>
-
-      {/* Learning Section */}
-      <View style={styles.learningSection}>
-        <Text style={styles.learnTitle}>📚 Learn as You Grow</Text>
-        <Text style={styles.learnDescription}>
-          Check out our bite-sized lessons on investing basics
-        </Text>
-        <TouchableOpacity style={styles.learnButton}>
-          <Text style={styles.learnButtonText}>Start Learning</Text>
-        </TouchableOpacity>
-      </View>
     </ScrollView>
   );
 }
 
-function InvestmentCard({ investment }: { investment: any }) {
-  const isPositive = investment.change >= 0;
+function InvestmentCard({ investment, color }: { investment: Investment, color: string }) {
+  const isPositive = investment.change_percent >= 0;
+  const changeAmount = (investment.value * investment.change_percent) / 100;
 
   return (
     <View style={styles.investmentCard}>
@@ -204,13 +231,13 @@ function InvestmentCard({ investment }: { investment: any }) {
               styles.changeValue,
               { color: isPositive ? '#10B981' : '#EF4444' }
             ]}>
-              {isPositive ? '+' : ''}${Math.abs(investment.change).toFixed(2)}
+              {isPositive ? '+' : ''}${Math.abs(changeAmount).toFixed(2)}
             </Text>
             <Text style={[
               styles.changePercent,
               { color: isPositive ? '#10B981' : '#EF4444' }
             ]}>
-              ({isPositive ? '+' : ''}{investment.changePercent.toFixed(2)}%)
+              ({isPositive ? '+' : ''}{investment.change_percent.toFixed(2)}%)
             </Text>
           </View>
         </View>
@@ -219,7 +246,7 @@ function InvestmentCard({ investment }: { investment: any }) {
         <View
           style={[
             styles.investmentBarFill,
-            { backgroundColor: investment.color, width: '60%' }
+            { backgroundColor: color, width: `${Math.random() * 50 + 20}%` } // Dummy width
           ]}
         />
       </View>
@@ -265,6 +292,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0F172A',
   },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0F172A',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -305,13 +338,11 @@ const styles = StyleSheet.create({
   changeIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
   },
   changeText: {
-    color: '#10B981',
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 4,
@@ -323,7 +354,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   portfolioChange: {
-    color: '#10B981',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -479,35 +509,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  learningSection: {
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 20,
-    marginBottom: 40,
-    alignItems: 'center',
-  },
-  learnTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  learnDescription: {
+  emptyStateText: {
     color: '#9CA3AF',
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 16,
-  },
-  learnButton: {
-    backgroundColor: '#8B5CF6',
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-  },
-  learnButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
+    paddingVertical: 20,
   },
 });
